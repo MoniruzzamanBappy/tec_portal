@@ -19,6 +19,7 @@ import Profile from "./components/Profile";
 import AddTimeSheet from "./components/AddTimeSheet";
 import PrivateLocalRoutes from "./components/PrivateLocalRoutes";
 import NotFound from "./components/NotFound";
+import TimeSheet from "./components/TimeSheet";
 
 function App() {
   const navigate = useNavigate();
@@ -123,6 +124,7 @@ function App() {
           <Route element={<PrivateLocalRoutes />}>
             <Route path="/jobsheets" element={<JobSheets />} />
             <Route path="/addtimesheet" element={<AddTimeSheet />} />
+            <Route path="/time-sheet" element={<TimeSheet />} />
             {/* <Route path="/jobsheets/view" element={<JobSheet />} /> */}
             <Route path="/jobsheet" element={<JobSheet />} />
             <Route path="/security" element={<Security />} />

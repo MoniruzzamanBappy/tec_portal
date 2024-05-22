@@ -139,7 +139,7 @@ function AddTimeSheet() {
   const printRef = useRef();
 
   const handlePrint = useReactToPrint({
-    content: () => printRef.current,
+    content: () => printRef?.current,
   });
 
   return (

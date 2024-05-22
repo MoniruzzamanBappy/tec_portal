@@ -11,7 +11,7 @@ const HttpKit = axios.create({
 
 HttpKit.interceptors.request.use(
   (config) => {
-    const token = window?.localStorage?.getItem("token");
+    const token = window?.localStorage?.getItem("refresh_token");
     if (token) {
       config.headers["Authorization"] = `Bearer ${token}`;
     }
@@ -31,8 +31,8 @@ HttpKit.interceptors.response.use(
       // window.location.reload();
     }
     if (status === 401) {
-      cleaner();
-      window.location.href = "/login";
+      //       cleaner();
+      //       window.location.href = "/login";
     }
     return Promise.reject(error);
   }

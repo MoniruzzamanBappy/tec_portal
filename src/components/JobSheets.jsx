@@ -401,16 +401,16 @@ const Example = () => {
         </Tooltip> */}
       </Box>
     ),
-    // renderTopToolbarCustomActions: ({ table }) => (
-    //   <Button
-    //     variant="contained"
-    //     onClick={() => {
-    //       table.setCreatingRow(true); //simplest way to open the create row modal with no default values
-    //     }}
-    //   >
-    //     Create New Job
-    //   </Button>
-    // ),
+    renderTopToolbarCustomActions: ({ table }) => (
+      <Button
+        variant="contained"
+        onClick={() => {
+          navigate("/jobsheet", { state: { createActivate: true } });
+        }}
+      >
+        Create New Job
+      </Button>
+    ),
     state: {
       isLoading: isLoadingUsers,
       //   isSaving: isCreatingUser || isUpdatingUser || isDeletingUser,

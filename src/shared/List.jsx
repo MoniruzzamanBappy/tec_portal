@@ -1,17 +1,28 @@
 import clsx from "clsx";
-import { get, isEmpty, isEqual, uniqBy } from "lodash";
+import get from "lodash/get";
+import isEmpty from "lodash/isEmpty";
+import uniqBy from "lodash/uniqBy";
 import React, {
+  Fragment,
   forwardRef,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { Fragment } from "react";
-import { useRef } from "react";
-import { ITEM_PER_PAGE } from "../common/constant";
-import { useScrollDirection } from "../hooks/useScrollDirection";
+import isEqual from "react-fast-compare";
 import { useReactToPrint } from "react-to-print";
+
+import { useScrollDirection } from "../hooks/useScrollDirection";
+import { ITEM_PER_PAGE } from "../common/constant";
+import useUpdateEffect from "../hooks/useUpdateEffect";
+import ListSkeleton from "./ListSkeleton";
+import ContextMenu from "./ContextMenu";
+import { toastError } from "./toastHelper";
+import useInfiniteScroll from "../hooks/useInfiniteScroll";
+import HttpKit from "../utilities/helper/HttpKit";
+import ScrollItemScroll from "./ScrollItemScroll";
 
 const BodyListItem = React.memo(
   ({
@@ -23,7 +34,6 @@ const BodyListItem = React.memo(
     item,
     customColumnClassNames,
     extraBorder,
-    t,
     pageStates,
     header,
     body,
@@ -31,7 +41,7 @@ const BodyListItem = React.memo(
     contextMenuData,
     printStyles,
   }) => {
-    const wrapperRef = useRef();
+    const wrapperRef = useRef("");
     const serialStyles = Array.isArray(customColumnClassNames)
       ? customColumnClassNames.find((item) => item.property === "si")
       : null;
@@ -66,14 +76,14 @@ const BodyListItem = React.memo(
           >
             {autoSerialNumber ? (
               <Fragment key={`${id}-${itemIndex}`}>
-                <h6 className="pl-4 py-2 md:hidden print:hidden">{t("SL")}</h6>
+                <h6 className="pl-4 py-2 md:hidden print:hidden">Sl</h6>
 
                 <div
                   className={`odd:bg-primary odd:md:bg-transparent text-right md:text-left pr-4 md:pr-0 py-2 md:py-0 print:text-left print:py-0 select-all ${
                     serialStyles ? serialStyles.className : ""
                   }`}
                 >
-                  {pageStates?.itemPerPage * pageStates?.currentPage +
+                  {pageStates.itemPerPage * pageStates.currentPage +
                     itemIndex +
                     1}
                 </div>
@@ -94,7 +104,7 @@ const BodyListItem = React.memo(
                   </div>
                   <div
                     className={`even-grid-cols-2:bg-default md:even-grid-cols-2:bg-transparent print:even-grid-cols-2:bg-transparent text-right md:text-left py-2 md:py-0 pr-4 md:pr-0 print:pr-0 print:even-grid-cols-2:bg-white print:text-left print:py-0 select-all ${
-                      hasCustomClassName?.length > 0
+                      hasCustomClassName.length > 0
                         ? hasCustomClassName[0].className
                         : ""
                     }`}
@@ -105,14 +115,14 @@ const BodyListItem = React.memo(
                 </Fragment>
               );
             })}
+            {renderDropdownItem && isAnyContextMenuItemsTrue && (
+              <ContextMenu
+                ref={wrapperRef}
+                content={contextMenuData({ row: item })}
+              />
+            )}
           </div>
         </div>
-        {/* {renderDropdownItem && isAnyContextMenuItemsTrue && (
-          <ContextMenu
-            ref={wrapperRef}
-            content={contextMenuData({ row: item })}
-          />
-        )} */}
       </Fragment>
     );
   },
@@ -131,7 +141,6 @@ const BodyItem = React.memo((props) => {
     properties,
     customColumnClassNames,
     extraBorder,
-    t,
     pageStates,
     header,
     body,
@@ -145,7 +154,7 @@ const BodyItem = React.memo((props) => {
   return renderAbleTableData?.map?.((item, itemIndex) => {
     const id = get(item, "id", "id");
     const refProp =
-      renderAbleTableData?.length === itemIndex + 1
+      renderAbleTableData.length === itemIndex + 1
         ? {
             ref: lastElementRef,
           }
@@ -174,7 +183,6 @@ const BodyItem = React.memo((props) => {
           item={item}
           customColumnClassNames={customColumnClassNames}
           extraBorder={extraBorder}
-          t={t}
           pageStates={pageStates}
           header={header}
           body={body}
@@ -199,22 +207,16 @@ const List = forwardRef((props, ref) => {
     printFunctionRef,
     style,
     callApi,
-    noDataFoundButton,
-    message,
     contextMenuData,
-    filterBadgeItems,
     showTotal,
     getTotalField,
-    printHeaderExtra,
     noPagination,
     customColumnClassNames,
     extraBorder,
     onAddRowClassName,
     numberOfLoadingSkeletonRows,
     mergeableData,
-    disabledBottomScrollButton,
-    accessorKey,
-    useTanstackTable = false,
+    disabledBottomScrollButton = false,
     autoSerialNumber = true,
     data = {},
     loading = false,
@@ -235,7 +237,6 @@ const List = forwardRef((props, ref) => {
   const [listData, setListData] = useState(data);
   const [isLoading, setIsLoading] = useState(loading);
   const [autoScroll, setAutoScroll] = useState(false);
-  const [sorting, setSorting] = useState([]);
   const [pageStates, setPageStates] = useState({
     itemPerPage: ITEM_PER_PAGE,
     currentPage: 0,
@@ -244,7 +245,6 @@ const List = forwardRef((props, ref) => {
   const [bottomScrollButton, setBottomScrollButton] = useState(
     disabledBottomScrollButton ? disabledBottomScrollButton : false
   );
-  const [filterItems, setFilterItems] = useState();
   const [queryValues, setQueryValue] = useState({});
 
   const printContentRef = useRef(null);
@@ -255,29 +255,18 @@ const List = forwardRef((props, ref) => {
     content: () => printContentRef.current,
     removeAfterPrint: true,
   });
+
+  const paginationType = 0;
   const next = get(listData, "next", "");
-  const previous = get(listData, "previous", "");
   const count = get(listData, "count", 0);
   const listDataResults = useMemo(() => {
-    const allListData = get(listData, "results", []);
+    const allListData = get(listData, "data", []);
     if (shouldRenderUniqueList) {
       return uniqBy(allListData, uniqueByIdentifier);
     } else {
       return allListData;
     }
   }, [listData, shouldRenderUniqueList, uniqueByIdentifier]);
-
-  const getPagePrintStyles = () => {
-    return `
-            @page {
-                size: A4;
-                margin-left: 3mm;
-                margin-right: 3mm;
-                margin-top: 5mm;
-                margin-bottom: 5mm;
-            }
-        `;
-  };
 
   const calculateGrandTotal = useMemo(() => {
     return Array.isArray(listDataResults)
@@ -311,7 +300,9 @@ const List = forwardRef((props, ref) => {
       };
 
       const onError = (error) => {
-        console.error(error);
+        toastError({
+          message: error.message ? error.message : "Something went wrong!",
+        });
         setHasInfiniteScrollError(true);
       };
 
@@ -319,11 +310,20 @@ const List = forwardRef((props, ref) => {
         // setIsLoading(false);
       };
 
-      callApi(url, onSuccess, onError, onFinally);
+      HttpKit.get(url).then(onSuccess).catch(onError).finally(onFinally);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [listDataResults, mergeableData, onChangeData]
   );
+
+  const [lastElementRef] = useInfiniteScroll({
+    loading: isLoading,
+    next,
+    callData,
+    paginationType,
+    hasInfiniteScrollError,
+    setHasInfiniteScrollError,
+    autoScroll,
+  });
 
   useEffect(() => {
     setListData(data);
@@ -353,17 +353,24 @@ const List = forwardRef((props, ref) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, queryValues]);
 
-  const columns = useMemo(() => {
-    return useTanstackTable
-      ? properties.map((propertyKey) => {
-          return {
-            header: header[propertyKey],
-            accessorKey: accessorKey[propertyKey],
-            propertyKey,
-          };
-        })
-      : [];
-  }, [properties, header, accessorKey, useTanstackTable]);
+  useEffect(() => {
+    setBottomScrollButton(disabledBottomScrollButton);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disabledBottomScrollButton]);
+
+  useUpdateEffect(() => {
+    const queryParams = { ...queryValues };
+    queryParams.key ? callApi?.(queryParams, true) : callApi?.(queryParams);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryValues]);
+
+  useEffect(() => {
+    setAutoScroll(false);
+
+    return () => {
+      setAutoScroll(false);
+    };
+  }, [queryValues]);
 
   const renderAbleTableData = listDataResults;
 
@@ -378,9 +385,7 @@ const List = forwardRef((props, ref) => {
         key={`${id}-${itemIndex}-header`}
         className={`print:break-inside-avoid-page print:table-header-group ${
           bottomScrollButton ? "" : "sticky"
-        } print:static ${
-          scrollDir === "up" ? "top-[8.74rem]" : "top-[63px]"
-        } z-10`}
+        } print:static ${scrollDir === "up" ? "top-[8.74rem]" : "top-0"} z-10`}
       >
         <div
           className={clsx(
@@ -412,7 +417,7 @@ const List = forwardRef((props, ref) => {
               <h6
                 key={`${propertyKey}-${propertyIndex}`}
                 className={`print:self-end select-all ${
-                  hasCustomClassName?.length > 0
+                  hasCustomClassName.length > 0
                     ? hasCustomClassName[0].className
                     : ""
                 }`}
@@ -431,6 +436,7 @@ const List = forwardRef((props, ref) => {
       {HeaderItem}
       <BodyItem
         listDataResults={renderAbleTableData}
+        lastElementRef={lastElementRef}
         onAddRowClassName={onAddRowClassName}
         style={style}
         autoSerialNumber={autoSerialNumber}
@@ -461,41 +467,45 @@ const List = forwardRef((props, ref) => {
 
   const NoDataFoundItem = (
     <div className="flex flex-grow justify-center items-center">
-      <h1 className="text-lg">{noDataFoundHeading}</h1>
-      {noDataFoundButton}
+      <h5 className="text-center text-lg">
+        {noDataFoundHeading ? noDataFoundHeading : "No Data Found"}
+      </h5>
+      <button onClick={() => callApi?.()} className="">
+        Refresh
+      </button>
     </div>
   );
 
-  // const PaginationItem = (
-  //   <Fragment>
-  //     {noPagination || listDataResults?.length < ITEM_PER_PAGE ? (
-  //       <></>
-  //     ) : (
-  //       // paginationType === ENUMS.paginationType.default.value ? (
-  //       //     <ScrollItemDefault
-  //       //         pageStates={pageStates}
-  //       //         setPageStates={setPageStates}
-  //       //         listDataResults={listDataResults}
-  //       //         t={t}
-  //       //         callApi={callApi}
-  //       //         count={count}
-  //       //         next={next}
-  //       //         previous={previous}
-  //       //         isLoading={isLoading}
-  //       //     />
-  //       // ) :
-  //       <ScrollItemScroll
-  //         listDataResults={listDataResults}
-  //         count={count}
-  //         loading={isLoading}
-  //         next={next}
-  //         callData={callData}
-  //         autoScroll={autoScroll}
-  //         setAutoScroll={setAutoScroll}
-  //       />
-  //     )}
-  //   </Fragment>
-  // );
+  const PaginationItem = (
+    <Fragment>
+      {noPagination || listDataResults.length < ITEM_PER_PAGE ? (
+        <></>
+      ) : (
+        // paginationType === ENUMS.paginationType.default.value ? (
+        //     <ScrollItemDefault
+        //         pageStates={pageStates}
+        //         setPageStates={setPageStates}
+        //         listDataResults={listDataResults}
+        //         t={t}
+        //         callApi={callApi}
+        //         count={count}
+        //         next={next}
+        //         previous={previous}
+        //         isLoading={isLoading}
+        //     />
+        // ) :
+        <ScrollItemScroll
+          listDataResults={listDataResults}
+          count={count}
+          loading={isLoading}
+          next={next}
+          callData={callData}
+          autoScroll={autoScroll}
+          setAutoScroll={setAutoScroll}
+        />
+      )}
+    </Fragment>
+  );
 
   const ListContentItem = (
     <div
@@ -505,6 +515,10 @@ const List = forwardRef((props, ref) => {
       )}
       ref={printContentRef}
     >
+      <div className="print:static top-16 px-4 print:px-0 py-4 border-y border-borderColor drop-shadow-md font-bold text-2xl uppercase print:capitalize text-left bg-default text-accent print:grid print:gap-x-3 print:bg-white print:font-bold print:border-b-2 print:border-t-2 print:py-1 print:my-2 print:border-y-0 print:border-b-black print:border-t-black print:drop-shadow-none print:text-black">
+        {title ? title : ""}
+      </div>
+      {!bottomScrollButton && PaginationItem}
       {Array.isArray(listDataResults) && isEmpty(listDataResults) ? (
         !isLoading ? (
           <div className="flex flex-grow border border-borderColor m-4 items-center">
@@ -521,19 +535,9 @@ const List = forwardRef((props, ref) => {
         TableItem
       )}
       {isLoading ? (
-        <div className="flex flex-grow justify-center items-center">
-          <div className="flex flex-col items-center">
-            {[...Array(numberOfLoadingSkeletonRows).keys()].map((item) => (
-              <div
-                key={item}
-                className="flex flex-row justify-between w-full my-2"
-              >
-                <div className="flex flex-col w-1/2 h-8 bg-gray-200 rounded"></div>
-                <div className="flex flex-col w-1/2 h-8 bg-gray-200 rounded"></div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ListSkeleton
+          rows={numberOfLoadingSkeletonRows ? numberOfLoadingSkeletonRows : 20}
+        />
       ) : (
         <></>
       )}
@@ -545,4 +549,4 @@ const List = forwardRef((props, ref) => {
 
 List.displayName = "List";
 
-export default List;
+export default React.memo(List, isEqual);
